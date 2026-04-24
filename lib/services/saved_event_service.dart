@@ -2,11 +2,32 @@ import '../main.dart';
 import '../models/event_model.dart';
 
 class SavedEventService {
+  bool isGuestUser() {
+    final user = supabase.auth.currentUser;
+
+    if (user == null) return true;
+
+    if (user.isAnonymous == true) return true;
+
+    final provider = user.appMetadata['provider'];
+    if (provider == 'anonymous') return true;
+
+    if ((user.email ?? '').trim().toLowerCase() == 'guest@local.dev') {
+      return true;
+    }
+
+    return false;
+  }
+
   Future<void> saveEvent(String eventId) async {
     final user = supabase.auth.currentUser;
 
     if (user == null) {
       throw 'You must be logged in to save an event.';
+    }
+
+    if (isGuestUser()) {
+      throw 'Guests cannot save events.';
     }
 
     final existing = await supabase
@@ -29,7 +50,7 @@ class SavedEventService {
   Future<List<EventModel>> fetchSavedEvents() async {
     final user = supabase.auth.currentUser;
 
-    if (user == null) {
+    if (user == null || isGuestUser()) {
       return [];
     }
 
@@ -75,12 +96,51 @@ class SavedEventService {
   Future<void> removeSavedEvent(String eventId) async {
     final user = supabase.auth.currentUser;
 
-    if (user == null) return;
+    if (user == null || isGuestUser()) return;
 
     await supabase
         .from('saved_events')
         .delete()
         .eq('user_id', user.id)
         .eq('event_id', eventId);
+  }
+
+  Future<bool> isEventSaved(String eventId) async {
+    final user = supabase.auth.currentUser;
+
+    if (user == null || isGuestUser()) {
+      return false;
+    }
+
+    final existing = await supabase
+        .from('saved_events')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('event_id', eventId)
+        .maybeSingle();
+
+    return existing != null;
+  }
+
+  Future<bool> toggleSavedEvent(String eventId) async {
+    final user = supabase.auth.currentUser;
+
+    if (user == null) {
+      throw 'You must be logged in to save an event.';
+    }
+
+    if (isGuestUser()) {
+      throw 'Guests cannot save events.';
+    }
+
+    final alreadySaved = await isEventSaved(eventId);
+
+    if (alreadySaved) {
+      await removeSavedEvent(eventId);
+      return false;
+    } else {
+      await saveEvent(eventId);
+      return true;
+    }
   }
 }

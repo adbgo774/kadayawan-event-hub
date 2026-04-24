@@ -65,6 +65,8 @@ class _MyAccountScreenState extends State<MyAccountScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isGuest = savedEventService.isGuestUser();
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('My Account'),
@@ -76,6 +78,7 @@ class _MyAccountScreenState extends State<MyAccountScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            /// HEADER
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -108,7 +111,10 @@ class _MyAccountScreenState extends State<MyAccountScreen> {
                 ],
               ),
             ),
+
             const SizedBox(height: 18),
+
+            /// ACCOUNT INFO
             _AccountInfoCard(
               icon: Icons.person_outline,
               title: 'User Name',
@@ -119,7 +125,10 @@ class _MyAccountScreenState extends State<MyAccountScreen> {
               title: 'Email',
               value: _getEmail(),
             ),
+
             const SizedBox(height: 16),
+
+            /// SAVED EVENTS TITLE
             const Text(
               'Saved Events',
               style: TextStyle(
@@ -128,82 +137,137 @@ class _MyAccountScreenState extends State<MyAccountScreen> {
                 color: AppColors.red,
               ),
             ),
+
             const SizedBox(height: 10),
-            FutureBuilder<List<EventModel>>(
-              future: savedEventsFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Center(child: CircularProgressIndicator()),
-                  );
-                }
 
-                if (snapshot.hasError) {
-                  return Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Text('Error loading saved events: ${snapshot.error}'),
-                    ),
-                  );
-                }
+            /// GUEST MESSAGE
+            if (isGuest)
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text(
+                    'Guest users cannot save events.',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                ),
+              )
+            else
+              FutureBuilder<List<EventModel>>(
+                future: savedEventsFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Padding(
+                      padding: EdgeInsets.all(20),
+                      child: Center(child: CircularProgressIndicator()),
+                    );
+                  }
 
-                final savedEvents = snapshot.data ?? [];
-
-                if (savedEvents.isEmpty) {
-                  return const Card(
-                    child: Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Text('No saved events yet.'),
-                    ),
-                  );
-                }
-
-                return Column(
-                  children: savedEvents.map((event) {
+                  if (snapshot.hasError) {
                     return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.all(14),
-                        leading: Container(
-                          width: 52,
-                          height: 52,
-                          decoration: BoxDecoration(
-                            color: AppColors.yellow.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: const Icon(
-                            Icons.bookmark,
-                            color: AppColors.orange,
-                          ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(
+                          'Error loading saved events: ${snapshot.error}',
                         ),
-                        title: Text(
-                          event.title,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        subtitle: Padding(
-                          padding: const EdgeInsets.only(top: 6),
-                          child: Text(_formatDate(event.date)),
-                        ),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => EventDetailsScreen(event: event),
-                            ),
-                          );
-                        },
                       ),
                     );
-                  }).toList(),
-                );
-              },
-            ),
+                  }
+
+                  final savedEvents = snapshot.data ?? [];
+
+                  if (savedEvents.isEmpty) {
+                    return const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Text('No saved events yet.'),
+                      ),
+                    );
+                  }
+
+                  return Column(
+                    children: savedEvents.map((event) {
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.all(14),
+
+                          /// ICON
+                          leading: Container(
+                            width: 52,
+                            height: 52,
+                            decoration: BoxDecoration(
+                              color: AppColors.yellow.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: const Icon(
+                              Icons.bookmark,
+                              color: AppColors.orange,
+                            ),
+                          ),
+
+                          /// TITLE
+                          title: Text(
+                            event.title,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+
+                          /// DATE
+                          subtitle: Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(_formatDate(event.date)),
+                          ),
+
+                          /// UNSAVE BUTTON
+                          trailing: IconButton(
+                            icon: const Icon(
+                              Icons.bookmark_remove_outlined,
+                              color: Colors.red,
+                            ),
+                            onPressed: () async {
+                              await savedEventService
+                                  .removeSavedEvent(event.id);
+
+                              if (!mounted) return;
+
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Event removed from saved events.',
+                                  ),
+                                ),
+                              );
+
+                              _refreshSavedEvents();
+                            },
+                          ),
+
+                          /// OPEN DETAILS
+                          onTap: () async {
+                            await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    EventDetailsScreen(event: event),
+                              ),
+                            );
+
+                            _refreshSavedEvents();
+                          },
+                        ),
+                      );
+                    }).toList(),
+                  );
+                },
+              ),
+
             const SizedBox(height: 20),
+
+            /// LOGOUT BUTTON
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(

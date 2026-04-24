@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../core/app_colors.dart';
 import '../models/event_model.dart';
+import '../services/feedback_service.dart';
 import '../services/location_service.dart';
 import '../services/saved_event_service.dart';
 
@@ -22,11 +23,78 @@ class EventDetailsScreen extends StatefulWidget {
 class _EventDetailsScreenState extends State<EventDetailsScreen> {
   final LocationService _locationService = LocationService();
   final SavedEventService _savedEventService = SavedEventService();
+  final FeedbackService _feedbackService = FeedbackService();
+
+  final TextEditingController _commentController = TextEditingController();
 
   bool _isLoadingLocation = false;
   bool _isSaving = false;
+  bool _isSaved = false;
+  bool _isCheckingSaved = true;
+
+  bool _isSubmittingFeedback = false;
+  bool _isLoadingFeedback = true;
+
+  int _selectedRating = 0;
+  List<Map<String, dynamic>> _feedbackList = [];
+
   String? _distanceText;
   String? _locationError;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkIfSaved();
+    _loadFeedback();
+  }
+
+  @override
+  void dispose() {
+    _commentController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _checkIfSaved() async {
+    try {
+      final saved = await _savedEventService.isEventSaved(widget.event.id);
+      if (!mounted) return;
+      setState(() {
+        _isSaved = saved;
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isCheckingSaved = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadFeedback() async {
+    try {
+      final feedback = await _feedbackService.fetchFeedbackForEvent(widget.event.id);
+      final myFeedback =
+          await _feedbackService.fetchMyFeedbackForEvent(widget.event.id);
+
+      if (!mounted) return;
+
+      setState(() {
+        _feedbackList = feedback;
+
+        if (myFeedback != null) {
+          _selectedRating = (myFeedback['rating'] as num?)?.toInt() ?? 0;
+          _commentController.text = (myFeedback['comments'] ?? '').toString();
+        }
+      });
+    } catch (_) {
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingFeedback = false;
+        });
+      }
+    }
+  }
 
   String _formatDate(DateTime? date) {
     if (date == null) return 'No date available';
@@ -37,6 +105,13 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     if (start == null && end == null) return 'Time not available';
     if (start != null && end != null) return '$start - $end';
     return start ?? end ?? 'Time not available';
+  }
+
+  String _formatDateTime(dynamic value) {
+    if (value == null) return '';
+    final parsed = DateTime.tryParse(value.toString());
+    if (parsed == null) return '';
+    return DateFormat('MMM d, y • h:mm a').format(parsed.toLocal());
   }
 
   Future<void> _getDistanceToVenue() async {
@@ -102,17 +177,36 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     }
   }
 
-  Future<void> _saveEvent() async {
+  Future<void> _toggleSaveEvent() async {
+    if (_savedEventService.isGuestUser()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Guests cannot save events.')),
+      );
+      return;
+    }
+
     setState(() {
       _isSaving = true;
     });
 
     try {
-      await _savedEventService.saveEvent(widget.event.id);
+      final isNowSaved =
+          await _savedEventService.toggleSavedEvent(widget.event.id);
 
       if (!mounted) return;
+
+      setState(() {
+        _isSaved = isNowSaved;
+      });
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Event saved successfully.')),
+        SnackBar(
+          content: Text(
+            isNowSaved
+                ? 'Event saved successfully.'
+                : 'Event removed from saved events.',
+          ),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -128,10 +222,79 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     }
   }
 
+  Future<void> _submitFeedback() async {
+    if (_feedbackService.isGuestUser()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Guests cannot submit feedback.')),
+      );
+      return;
+    }
+
+    if (_selectedRating == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a rating first.')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isSubmittingFeedback = true;
+    });
+
+    try {
+      await _feedbackService.submitFeedback(
+        eventId: widget.event.id,
+        rating: _selectedRating,
+        comments: _commentController.text,
+      );
+
+      await _loadFeedback();
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Feedback submitted successfully.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmittingFeedback = false;
+        });
+      }
+    }
+  }
+
+  Widget _buildStarPicker(bool isGuest) {
+    return Row(
+      children: List.generate(5, (index) {
+        final star = index + 1;
+        return IconButton(
+          onPressed: isGuest
+              ? null
+              : () {
+                  setState(() {
+                    _selectedRating = star;
+                  });
+                },
+          icon: Icon(
+            star <= _selectedRating ? Icons.star : Icons.star_border,
+            color: Colors.amber,
+            size: 32,
+          ),
+        );
+      }),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasImage =
         widget.event.imageUrl != null && widget.event.imageUrl!.trim().isNotEmpty;
+    final isGuest = _savedEventService.isGuestUser();
 
     return Scaffold(
       appBar: AppBar(
@@ -206,11 +369,25 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: _isSaving ? null : _saveEvent,
-              icon: const Icon(Icons.bookmark_add_outlined),
-              label: Text(_isSaving ? 'Saving...' : 'Save Event'),
+              onPressed: (isGuest || _isSaving || _isCheckingSaved)
+                  ? null
+                  : _toggleSaveEvent,
+              icon: Icon(
+                _isSaved
+                    ? Icons.bookmark_remove_outlined
+                    : Icons.bookmark_add_outlined,
+              ),
+              label: Text(
+                _isCheckingSaved
+                    ? 'Checking...'
+                    : _isSaving
+                        ? 'Please wait...'
+                        : _isSaved
+                            ? 'Unsave Event'
+                            : 'Save Event',
+              ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.orange,
+                backgroundColor: isGuest ? Colors.grey : AppColors.orange,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
@@ -219,6 +396,14 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
               ),
             ),
           ),
+          if (isGuest)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text(
+                'Guest users cannot save events or submit feedback.',
+                style: TextStyle(color: Colors.red),
+              ),
+            ),
           const SizedBox(height: 16),
           Card(
             shape: RoundedRectangleBorder(
@@ -272,6 +457,140 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                       ),
                     ],
                   ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Card(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Rate and Review',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('Your Rating'),
+                  const SizedBox(height: 6),
+                  _buildStarPicker(isGuest),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _commentController,
+                    enabled: !isGuest && !_isSubmittingFeedback,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      hintText: isGuest
+                          ? 'Guests cannot submit feedback.'
+                          : 'Write your feedback here...',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: (isGuest || _isSubmittingFeedback)
+                          ? null
+                          : _submitFeedback,
+                      icon: const Icon(Icons.rate_review_outlined),
+                      label: Text(
+                        _isSubmittingFeedback
+                            ? 'Submitting...'
+                            : 'Submit Feedback',
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor:
+                            isGuest ? Colors.grey : AppColors.orange,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Card(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Recent Feedback',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (_isLoadingFeedback)
+                    const Center(child: CircularProgressIndicator())
+                  else if (_feedbackList.isEmpty)
+                    const Text('No feedback yet for this event.')
+                  else
+                    ..._feedbackList.map((item) {
+                      final rating = (item['rating'] as num?)?.toInt() ?? 0;
+                      final comments = (item['comments'] ?? '').toString();
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: Colors.grey.shade300),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: List.generate(5, (index) {
+                                return Icon(
+                                  index < rating
+                                      ? Icons.star
+                                      : Icons.star_border,
+                                  color: Colors.amber,
+                                  size: 18,
+                                );
+                              }),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              comments.isEmpty
+                                  ? 'No comment provided.'
+                                  : comments,
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              _formatDateTime(item['created_at']),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.black54,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
                 ],
               ),
             ),

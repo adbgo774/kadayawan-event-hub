@@ -1,10 +1,13 @@
-// ANGELIQUE DAWN B. GO
-
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'screens/login_screen.dart';
 import 'screens/main_navigation_screen.dart';
+import 'services/notification_service.dart';
+
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+final GlobalKey<ScaffoldMessengerState> rootScaffoldMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,6 +16,8 @@ Future<void> main() async {
     url: 'https://ovdqxebojmanmzykwmsw.supabase.co',
     anonKey: 'sb_publishable_Dc70ds4ffgsmfdz90l82yA_Dux00t1M',
   );
+
+  await NotificationService.init();
 
   runApp(const MyApp());
 }
@@ -25,6 +30,8 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: appNavigatorKey,
+      scaffoldMessengerKey: rootScaffoldMessengerKey,
       title: 'Kadayawan Event Hub',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(

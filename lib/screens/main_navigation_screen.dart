@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/app_colors.dart';
+import '../services/event_realtime_service.dart';
 import 'dashboard_screen.dart';
 import 'my_account_screen.dart';
 
@@ -13,11 +14,24 @@ class MainNavigationScreen extends StatefulWidget {
 
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int currentIndex = 0;
+  final EventRealtimeService _eventRealtimeService = EventRealtimeService();
 
   final List<Widget> screens = const [
     DashboardScreen(),
     MyAccountScreen(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _eventRealtimeService.startListening();
+  }
+
+  @override
+  void dispose() {
+    _eventRealtimeService.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
